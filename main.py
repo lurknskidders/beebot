@@ -1,66 +1,56 @@
 import os
-import asyncio
-import logging
 import requests
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
+import asyncio
 
-# Load Telegram bot token from Railway environment variable
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
     raise Exception("Missing TOKEN environment variable.")
 
-# Load Bee Movie script lines from Gist (live)
+API_URL = f"https://api.telegram.org/bot{TOKEN}"
 BEE_MOVIE_URL = 'https://gist.githubusercontent.com/MattIPv4/045239bc27b16b2bcf7a3a9a4648c08a/raw'
+
 lines = requests.get(BEE_MOVIE_URL).text.strip().splitlines()
 
-# Track which line each chat has seen
 chat_progress = {}
+registered_chats = set()
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Get updates from Telegram (long polling)
+async def get_updates(offset=None):
+    params = {"timeout": 100, "offset": offset}
+    resp = requests.get(f"{API_URL}/getUpdates", params=params)
+    return resp.json()
 
-# Called when the bot sees any message in a chat
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id not in chat_progress:
-        chat_progress[chat_id] = 0
-        await context.bot.send_message(chat_id, "🍯 Bee Movie Bot activated! You'll now receive one line per hour.")
+# Send message to a chat
+def send_message(chat_id, text):
+    requests.post(f"{API_URL}/sendMessage", data={"chat_id": chat_id, "text": text})
 
-# Background job: sends a line from the movie every hour
-async def send_line_periodically(application):
+async def main_loop():
+    offset = None
     while True:
-        for chat_id in list(chat_progress.keys()):
-            index = chat_progress[chat_id]
-            if index < len(lines):
-                try:
-                    await application.bot.send_message(chat_id, lines[index])
-                    chat_progress[chat_id] += 1
-                except Exception as e:
-                    logger.warning(f"Failed to send to {chat_id}: {e}")
+        updates = await get_updates(offset)
+        if updates.get("ok"):
+            for update in updates["result"]:
+                offset = update["update_id"] + 1
+
+                # Register any chat that sends a message
+                message = update.get("message")
+                if message:
+                    chat_id = message["chat"]["id"]
+                    if chat_id not in registered_chats:
+                        registered_chats.add(chat_id)
+                        chat_progress[chat_id] = 0
+                        send_message(chat_id, "🍯 Bee Movie Bot activated! You'll now receive one line per hour.")
+
+        # Send the next line to each chat
+        for chat_id in list(registered_chats):
+            idx = chat_progress.get(chat_id, 0)
+            if idx < len(lines):
+                send_message(chat_id, lines[idx])
+                chat_progress[chat_id] = idx + 1
             else:
-                chat_progress[chat_id] = 0  # Restart from beginning
-        await asyncio.sleep(3600)  # Wait 1 hour
+                chat_progress[chat_id] = 0  # loop again
 
-# Main async entry point
-async def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+        await asyncio.sleep(3600)  # 1 hour wait
 
-    # Listen for all text messages (to register groups/chats)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Start the background loop for sending messages
-    asyncio.create_task(send_line_periodically(app))
-
-    # Start the bot
-    await app.run_polling()
-
-# Start everything
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main_loop())
