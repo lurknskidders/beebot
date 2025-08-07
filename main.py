@@ -1,50 +1,54 @@
-import asyncio
-import os
-import random
+import logging
 import requests
-from telegram import Update, Bot
-from telegram.ext import (
-    ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
-)
+import schedule
+import time
+import threading
+from telegram import Update
+from telegram.ext import Updater, CallbackContext, MessageHandler, Filters
 
-# Get token from environment variable (use Railway's Variables section)
-BOT_TOKEN = os.getenv("8476228733:AAGV3gPfzFFtxJdb6-CkJhoO7LPgYtXN-GU")
-# Bee Movie script source
-SCRIPT_URL = 'https://gist.githubusercontent.com/MattIPv4/045239bc27b16b2bcf7a3a9a4648c08a/raw'
+TOKEN = '8476228733:AAGV3gPfzFFtxJdb6-CkJhoO7LPgYtXN-GU'
 
-# Fetch Bee Movie lines
-def fetch_bee_lines():
-    txt = requests.get(SCRIPT_URL).text
-    lines = [line.strip() for line in txt.splitlines() if line.strip() and '-' not in line]
-    return lines
+# Load Bee Movie lines from Gist
+BEE_MOVIE_URL = 'https://gist.githubusercontent.com/MattIPv4/045239bc27b16b2bcf7a3a9a4648c08a/raw'
+lines = requests.get(BEE_MOVIE_URL).text.strip().splitlines()
 
-bee_lines = fetch_bee_lines()
-active_chats = set()
+# Dict to track progress per chat
+chat_progress = {}
 
-# /activate command
-async def activate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cid = update.effective_chat.id
-    if cid not in active_chats:
-        active_chats.add(cid)
-        await context.bot.send_message(chat_id=cid, text="🐝 Bee Movie bot activated. Expect random lines hourly.")
-    else:
-        await context.bot.send_message(chat_id=cid, text="✅ Already activated.")
+def handle_message(update: Update, context: CallbackContext):
+    chat_id = update.effective_chat.id
+    if chat_id not in chat_progress:
+        chat_progress[chat_id] = 0
+        context.bot.send_message(chat_id, "Bee Movie bot is now active in this chat.")
 
-# Send Bee Movie lines every hour
-async def random_bee_hourly(bot: Bot):
+def send_line(context: CallbackContext):
+    for chat_id in chat_progress:
+        index = chat_progress[chat_id]
+        if index < len(lines):
+            context.bot.send_message(chat_id, lines[index])
+            chat_progress[chat_id] += 1
+        else:
+            chat_progress[chat_id] = 0  # restart
+
+def run_schedule(context: CallbackContext):
     while True:
-        for cid in list(active_chats):
-            msg = random.choice(bee_lines)
-            await bot.send_message(chat_id=cid, text=msg)
-        await asyncio.sleep(3600)  # Every hour
+        schedule.run_pending()
+        time.sleep(1)
 
-# Start bot
-async def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("activate", activate))
-    asyncio.create_task(random_bee_hourly(app.bot))
-    print("🐝 Bee Movie bot running.")
-    await app.run_polling()
+def main():
+    updater = Updater(token=TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    # Any message triggers registration
+    dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), handle_message))
+
+    # Send a line every hour to all registered chats
+    schedule.every().hour.do(send_line, context=updater.bot)
+
+    threading.Thread(target=run_schedule, args=(updater.bot,), daemon=True).start()
+
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
+    main()
