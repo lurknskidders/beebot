@@ -2,7 +2,7 @@ import os
 import requests
 import asyncio
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("8476228733:AAGV3gPfzFFtxJdb6-CkJhoO7LPgYtXN-GU")
 if not TOKEN:
     raise Exception("Missing TOKEN environment variable.")
 
