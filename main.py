@@ -5,7 +5,7 @@ import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 
-BOT_TOKEN = os.getenv("8476228733:AAEXiiWe5cnoTjpzcN1svve8Q9RJOVzG_iY")
+BOT_TOKEN = os.getenv("8476228733:AAGxTOE5ZSqqkeCW9HxQAAPSmVJB84tdfbU")
 SCRIPT_URL = 'https://gist.githubusercontent.com/MattIPv4/045239bc27b16b2bcf7a3a4648c08a/raw'
 
 def fetch_bee_lines():
